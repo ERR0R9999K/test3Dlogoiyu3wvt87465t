@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Модель</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: #f0f0f0;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas3d"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+
+    <script>
+        // Сцена
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f0f0);
+
+        // Камера
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        // Рендерер
+        const renderer = new THREE.WebGLRenderer({ 
+            canvas: document.getElementById('canvas3d'),
+            antialias: true 
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        
+        // Отключаем тени полностью
+        renderer.shadowMap.enabled = false;
+
+        // Освещение без теней
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(1, 1, 1);
+        directionalLight.castShadow = false;
+        scene.add(directionalLight);
+
+        // Загрузчики
+        const mtlLoader = new THREE.MTLLoader();
+        const objLoader = new THREE.OBJLoader();
+
+        let model = null;
+        let rotationSpeed = 0.005; // Скорость вращения
+
+        // Загрузка модели из файлов сайта
+        // Предполагается, что файлы находятся в той же папке, что и HTML файл:
+        // - model.mtl
+        // - model.obj
+        // - texture.png (или другие текстуры, указанные в MTL файле)
+        
+        mtlLoader.load('logo.mtl', (materials) => {
+            materials.preload();
+            
+            objLoader.setMaterials(materials);
+            objLoader.load('logo.obj', (object) => {
+                model = object;
+                
+                // Отключаем тени для всех частей модели
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = false;
+                        child.receiveShadow = false;
+                    }
+                });
+                
+                // Центрируем модель
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                model.position.sub(center);
+                
+                scene.add(model);
+                
+                // Настраиваем камеру под модель
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                camera.position.z = maxDim * 1.5;
+                
+                // Запускаем анимацию
+                animate();
+            }, 
+            // Прогресс загрузки
+            (xhr) => {
+                console.log((xhr.loaded / xhr.total * 100) + '% загружено');
+            },
+            // Обработка ошибок
+            (error) => {
+                console.error('Ошибка загрузки модели:', error);
+                // Создаем куб для демонстрации, если модель не загрузилась
+                createFallbackModel();
+            });
+        },
+        // Прогресс загрузки MTL
+        (xhr) => {
+            console.log('MTL: ' + (xhr.loaded / xhr.total * 100) + '% загружено');
+        },
+        // Обработка ошибок MTL
+        (error) => {
+            console.error('Ошибка загрузки материалов:', error);
+            // Пытаемся загрузить OBJ без материалов
+            loadObjWithoutMaterials();
+        });
+
+        // Загрузка OBJ без материалов (если MTL не загрузился)
+        function loadObjWithoutMaterials() {
+            objLoader.load('model.obj', (object) => {
+                model = object;
+                
+                // Создаем простой материал, если нет текстуры
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshLambertMaterial({ 
+                            color: 0x888888 
+                        });
+                        child.castShadow = false;
+                        child.receiveShadow = false;
+                    }
+                });
+                
+                // Центрируем модель
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                model.position.sub(center);
+                
+                scene.add(model);
+                
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                camera.position.z = maxDim * 1.5;
+                
+                animate();
+            }, undefined, (error) => {
+                console.error('Не удалось загрузить OBJ файл:', error);
+                createFallbackModel();
+            });
+        }
+
+        // Создание демо-модели если загрузка не удалась
+        function createFallbackModel() {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshLambertMaterial({ 
+                color: 0x3498db,
+                transparent: true,
+                opacity: 0.8
+            });
+            model = new THREE.Mesh(geometry, material);
+            model.castShadow = false;
+            model.receiveShadow = false;
+            scene.add(model);
+            
+            camera.position.z = 3;
+            animate();
+        }
+
+        // Анимация
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Вращение модели только по оси Y
+            if (model) {
+                model.rotation.y += rotationSpeed;
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Обработка изменения размера окна
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Запрет всех взаимодействий
+        document.addEventListener('mousedown', (e) => e.preventDefault());
+        document.addEventListener('touchstart', (e) => e.preventDefault());
+        document.addEventListener('wheel', (e) => e.preventDefault());
+        document.addEventListener('contextmenu', (e) => e.preventDefault());
+        document.addEventListener('keydown', (e) => e.preventDefault());
+    </script>
+</body>
+</html>
